@@ -1,40 +1,72 @@
-# ASP.NET Core (.NET Framework)
-
-# Build and test ASP.NET Core projects targeting the full .NET Framework.
-# Add steps that publish symbols, save build artifacts, and more:
-# https://docs.microsoft.com/azure/devops/pipelines/languages/dotnet-core
-
 trigger:
-- master
-
-pool:
-  vmImage: 'windows-latest'
+  branches:
+    include:
+    - master
+  paths:
+    exclude:
+    - build-pipeline.yml
+    - release-pipeline.yml
 
 variables:
-  solution: '**/*.sln'
-  buildPlatform: 'Any CPU'
-  buildConfiguration: 'Release'
+  vmImageName: 'ubuntu-latest'
 
-steps:
-- task: NuGetToolInstaller@1
+jobs:  
+- job: Build
+  pool:
+    vmImage: $(vmImageName)
+  steps:
+  - script: | 
+      echo 'do some unit test'
+    displayName: 'unit test'
+  - script: | 
+      echo 'compile application'
+    displayName: 'compile'
+  - task: ArchiveFiles@2
+    displayName: 'Archive files'
+    inputs:
+      rootFolderOrFile: '$(System.DefaultWorkingDirectory)'
+      includeRootFolder: false
+      archiveType: zip
+      archiveFile: $(Build.ArtifactStagingDirectory)/$(Build.BuildId).zip
+      replaceExistingArchive: true
+  - upload: $(Build.ArtifactStagingDirectory)/$(Build.BuildId).zip
+    artifact: drop
 
-- task: NuGetCommand@2
-  inputs:
-    restoreSolution: '$(solution)'
 
-- task: VSBuild@1
-  inputs:
-    solution: '$(solution)'
-    msbuildArgs: '/p:DeployOnBuild=true /p:WebPublishMethod=Package /p:PackageAsSingleFile=true /p:SkipInvalidConfigurations=true /p:DesktopBuildPackageLocation="$(build.artifactStagingDirectory)\WebApp.zip" /p:DeployIisAppPath="Default Web Site"'
-    platform: '$(buildPlatform)'
-    configuration: '$(buildConfiguration)'
 
-- task: VSTest@2
-  inputs:
-    platform: '$(buildPlatform)'
-    configuration: '$(buildConfiguration)'
-- task: PublishBuildArtifacts@1
-  inputs:
-    PathtoPublish: '$(Build.ArtifactStagingDirectory)'
-    ArtifactName: 'artll'
-    publishLocation: 'Container'
+
+
+# Explicitly set none for repositry trigger
+trigger:
+- none
+
+resources:
+  pipelines:
+  - pipeline: myappbuild  # Name of the pipeline resource
+    source: myapp-build-pipeline # Name of the triggering pipeline
+    trigger: 
+      branches:
+      - master
+
+variables:
+  vmImageName: 'ubuntu-latest'
+
+jobs:
+- deployment: Deploy
+  displayName: Deploy
+  environment: dev
+  pool: 
+    vmImage: $(vmImageName)
+  strategy:
+    runOnce:
+      deploy:
+        steps:          
+        - download: myappbuild
+          artifact: drop  
+        - task: ExtractFiles@1
+          inputs:
+            archiveFilePatterns: '$(PIPELINE.WORKSPACE)/myappbuild/drop/$(resources.pipeline.myappbuild.runID).zip'
+            destinationFolder: '$(agent.builddirectory)'
+            cleanDestinationFolder: false
+        - script: |  
+            cat $(agent.builddirectory)/greatcode.txt
